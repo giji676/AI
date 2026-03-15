@@ -7,17 +7,14 @@ def vectorized_result(j):
     return e
 
 # --- LOAD DATA ---
-data = np.loadtxt("mnist_train.csv", delimiter=",")
+train_data = np.loadtxt("mnist/mnist_train.csv", delimiter=",")
+test_data = np.loadtxt("mnist/mnist_train.csv", delimiter=",")
 
-Y_raw = data[:,0].astype(int)
-X_raw = data[:,1:] / 255.0
+Y_train = train_data[:,0].astype(int)
+X_train = train_data[:,1:] / 255.0
 
-# --- SPLIT 50k / 10k ---
-X_train = X_raw[:50000]
-Y_train = Y_raw[:50000]
-
-X_test = X_raw[50000:]
-Y_test = Y_raw[50000:]
+Y_test = test_data[:,0].astype(int)
+X_test = test_data[:,1:] / 255.0
 
 # --- FORMAT DATA ---
 training_data = [
@@ -44,7 +41,7 @@ net.sgd(
 net.save()
 
 while True:
-    user_input = input("Enter image index (0-59999) or 'q' to quit: ")
+    user_input = input(f"Enter image index (0-{len(X_test)-1}) or 'q' to quit: ")
 
     # quit option
     if user_input.lower() == "q":
@@ -58,14 +55,14 @@ while True:
     idx = int(user_input)
 
     # bounds check
-    if idx < 0 or idx >= len(X_raw):
-        print(f"Index out of bounds. Enter a value between 0 and {len(X_raw)-1}.")
+    if idx < 0 or idx >= len(X_test):
+        print(f"Index out of bounds. Enter a value between 0 and {len(X_test)-1}.")
         continue
 
     # run prediction
-    x = X_raw[idx].reshape(784,1)
+    x = X_test[idx].reshape(784,1)
     prediction = np.argmax(net.feed_forward(x))
 
     print("Prediction:", prediction)
-    print("Label:", Y_raw[idx])
+    print("Label:", Y_test[idx])
     print()
