@@ -6,80 +6,97 @@ class Network:
     def __init__(self, sizes):
         self.num_layers = len(sizes)
         self.sizes = sizes
-        self.biases = [np.random.randn(y, 1) for y in sizes[1:]]
-        self.weights = [np.random.randn(y, x)
-            for x, y in zip(sizes[:-1], sizes[1:])]
+        # biases and weights (Xavier)
+        self.biases = [np.zeros((y, 1)) for y in sizes[1:]]
+        self.weights = [np.random.randn(y, x) * np.sqrt(1/x)
+                        for x, y in zip(sizes[:-1], sizes[1:])]
 
+    # --- Activations ---
     def sigmoid(self, z):
-        return 1.0/(1.0 + np.exp(-z))
-
-    def feed_forward(self, a):
-        for b, w in zip(self.biases, self.weights):
-            a = self.sigmoid(w @ a + b)
-        return a
-
-    def sgd(self, training_data, epochs, mini_batch_size, eta, test_data=None):
-
-        if not test_data: return
-        n_test = len(test_data)
-        n = len(training_data)
-        for j in range(epochs):
-            random.shuffle(training_data)
-            mini_batches = [
-                training_data[k:k+mini_batch_size]
-                for k in range(0, n, mini_batch_size)]
-            for mini_batch in mini_batches:
-                self.update_mini_batch(mini_batch, eta)
-            if test_data:
-                print(f"Epoch {j}: {self.evaluate(test_data)} / {n_test}")
-            else:
-                print(f"Epoch {j} complete")
-
-    def update_mini_batch(self, mini_batch, eta):
-        nabla_b = [np.zeros(b.shape) for b in self.biases]
-        nabla_w = [np.zeros(w.shape) for w in self.weights]
-        for x, y in mini_batch:
-            delta_nabla_b, delta_nabla_w = self.backprop(x, y)
-            nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-            nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
-        self.weights = [w-(eta/len(mini_batch))*nw
-            for w, nw in zip(self.weights, nabla_w)]
-        self.biases = [b-(eta/len(mini_batch))*nb
-            for b, nb in zip(self.biases, nabla_b)]
-
-    def backprop(self, x, y):
-        nabla_b = [np.zeros(b.shape) for b in self.biases]
-        nabla_w = [np.zeros(w.shape) for w in self.weights]
-        activation = x
-        activations = [x]
-        zs = []
-        for b, w in zip(self.biases, self.weights):
-            z = w @ activation + b
-            zs.append(z)
-            activation = self.sigmoid(z)
-            activations.append(activation)
-        delta = self.cost_derivative(activations[-1], y) * self.sigmoid_prime(zs[-1])
-        nabla_b[-1] = delta
-        nabla_w[-1] = delta @ activations[-2].T
-        for l in range(2, self.num_layers):
-            z = zs[-l]
-            sp = self.sigmoid_prime(z)
-            delta = (self.weights[-l+1].T @ delta) * sp
-            nabla_b[-l] = delta
-            nabla_w[-l] = delta @ activations[-l-1].T
-        return (nabla_b, nabla_w)
-
-    def evaluate(self, test_data):
-        test_results = [(np.argmax(self.feed_forward(x)), y)
-                        for (x, y) in test_data]
-        return sum(int(x == y) for (x, y) in test_results)
+        return 1.0 / (1.0 + np.exp(-z))
     
-    def cost_derivative(self, output_activations, y):
-        return output_activations-y
+    def softmax(self, z):
+        exp_z = np.exp(z - np.max(z, axis=0, keepdims=True))
+        return exp_z / np.sum(exp_z, axis=0, keepdims=True)
 
-    def sigmoid_prime(self, z):
-        return self.sigmoid(z) * (1-self.sigmoid(z))
+    # --- Feedforward ---
+    def feed_forward(self, A0):
+        """A0: input shape (features, batch_size)"""
+        cache = {"A0": A0}
+        Al = A0
+        for l in range(self.num_layers - 2):
+            Z = self.weights[l] @ Al + self.biases[l]
+            Al = self.sigmoid(Z)
+            cache[f"A{l+1}"] = Al
+            cache[f"Z{l+1}"] = Z
+        # output layer with softmax
+        ZL = self.weights[-1] @ Al + self.biases[-1]
+        AL = self.softmax(ZL)
+        cache[f"A{self.num_layers-1}"] = AL
+        cache[f"Z{self.num_layers-1}"] = ZL
+        return AL, cache
 
+    # --- Cost (cross-entropy) ---
+    def cost(self, Y_hat, Y):
+        m = Y.shape[1]
+        return -np.sum(Y * np.log(Y_hat + 1e-8)) / m
+
+    # --- Update mini-batch (fully vectorized) ---
+    def update_mini_batch(self, X_batch, Y_batch, eta):
+        """X_batch: (features, batch_size), Y_batch: (classes, batch_size)"""
+        m = X_batch.shape[1]
+        AL, cache = self.feed_forward(X_batch)
+
+        # --- Gradients ---
+        grads_W = [np.zeros_like(w) for w in self.weights]
+        grads_b = [np.zeros_like(b) for b in self.biases]
+
+        # output layer
+        dZ = AL - Y_batch
+        grads_W[-1] = dZ @ cache[f"A{self.num_layers-2}"].T / m
+        grads_b[-1] = np.sum(dZ, axis=1, keepdims=True) / m
+
+        # backward pass for hidden layers
+        dA_prev = self.weights[-1].T @ dZ
+        for l in range(self.num_layers - 2, 0, -1):
+            Z = cache[f"Z{l}"]
+            A = cache[f"A{l}"]
+            dZ = dA_prev * A * (1 - A)  # sigmoid derivative
+            grads_W[l-1] = dZ @ cache[f"A{l-1}"].T / m
+            grads_b[l-1] = np.sum(dZ, axis=1, keepdims=True) / m
+            if l > 1:
+                dA_prev = self.weights[l-1].T @ dZ
+
+        # --- Update weights ---
+        self.weights = [w - eta * gw for w, gw in zip(self.weights, grads_W)]
+        self.biases = [b - eta * gb for b, gb in zip(self.biases, grads_b)]
+
+    # --- SGD ---
+    def sgd(self, X, Y, epochs, mini_batch_size, eta):
+        n = X.shape[1]
+        for j in range(epochs):
+            perm = np.random.permutation(n)
+            X_shuffled = X[:, perm]
+            Y_shuffled = Y[:, perm]
+
+            for start in range(0, n, mini_batch_size):
+                end = start + mini_batch_size
+                X_batch = X_shuffled[:, start:end]
+                Y_batch = Y_shuffled[:, start:end]
+                self.update_mini_batch(X_batch, Y_batch, eta)
+
+            # compute cost after epoch
+            AL, _ = self.feed_forward(X)
+            c = self.cost(AL, Y)
+            print(f"Epoch {j+1}/{epochs}, cost = {c:.4f}")
+
+    # --- Predict ---
+    def predict(self, x):
+        """x: shape (features, 1)"""
+        AL, _ = self.feed_forward(x)
+        return np.argmax(AL)
+
+    # --- Save model ---
     def save(self, filename="mnist_model.pkl"):
         with open(filename, "wb") as f:
             pickle.dump(self, f)
