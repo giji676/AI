@@ -8,7 +8,7 @@ def vectorized_result(j):
 
 # --- LOAD DATA ---
 train_data = np.loadtxt("mnist/mnist_train.csv", delimiter=",")
-test_data = np.loadtxt("mnist/mnist_train.csv", delimiter=",")
+test_data = np.loadtxt("mnist/mnist_test.csv", delimiter=",")
 
 Y_train = train_data[:,0].astype(int)
 X_train = train_data[:,1:] / 255.0
